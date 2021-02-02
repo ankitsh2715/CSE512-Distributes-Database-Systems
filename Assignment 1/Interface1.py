@@ -1,3 +1,6 @@
+RANGE_TABLE_PREFIX = 'range_ratings_part'
+RROBIN_TABLE_PREFIX = 'round_robin_ratings_part'
+
 import psycopg2
 import os
 import sys
@@ -9,25 +12,55 @@ def getOpenConnection(user='postgres', password='1234', dbname='postgres'):
 
 def loadRatings(ratingstablename, ratingsfilepath, openconnection):
     cur = openconnection.cursor()
-    #create ratings table
-    createQuery = "CREATE TABLE "+ ratingstablename +"(UserID integer, Delimiter1 char, MovieID integer, Delimiter2 char, Rating float, Delimiter3 char, Timestamp bigint);"
+    #create ratings table #DelimiterX columns are for extra ':' in '::' as copy_from function only takes single-byte sep input
+    createQuery = "CREATE TABLE " + ratingstablename+ "(userid integer, delimiter1 char, movieid integer, delimiter2 char, rating float, delimiter3 char, timestamp bigint);"
     cur.execute(createQuery)
     #copy input file data to ratings table
     ratingsFile = open(ratingsfilepath,'r')
     cur.copy_from(ratingsFile, ratingstablename, sep=':')
     #delete extra columns due to separator not being single-byte and Timestamp column
-    alterQuery = "ALTER TABLE " + ratingstablename + " DROP COLUMN Delimiter1, DROP COLUMN Delimiter2, DROP COLUMN Delimiter3, DROP COLUMN Timestamp;" 
+    alterQuery = "ALTER TABLE " + ratingstablename+ " DROP COLUMN delimiter1, DROP COLUMN delimiter2, DROP COLUMN delimiter3, DROP COLUMN timestamp;" 
     cur.execute(alterQuery)
     #release objects
     cur.close()
     openconnection.commit()
 
 
+def mytesterfunc():
+    pass
+
 def rangePartition(ratingstablename, numberofpartitions, openconnection):
-    pass # Remove this once you are done with implementation
+    cur = openconnection.cursor()
+    
+    if(numberofpartitions > 0):
+        #to calculate range for ratings
+        interval = round(5.0/numberofpartitions,2)
+    
+        for i in range(numberofpartitions):
+            rangePartitionTableName = RANGE_TABLE_PREFIX + str(i)
+            minRating = i * interval
+            maxRating = minRating + interval
+            #this if condition is not necessary
+            if(maxRating > 5):
+                maxRating = 5
+            
+            createQuery = "CREATE TABLE " + rangePartitionTableName + " (userid integer, movieid integer, rating float);"
+            cur.execute(createQuery)
+            
+            #because for first partition range is [0, interval]
+            if(i==0):
+                insertQuery = "INSERT INTO " + rangePartitionTableName + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE rating >= " + str(minRating) + " and rating <= " + str(maxRating) + ";"
+            #because second partition onwards range is (interval, interval*2]
+            else:
+                insertQuery = "INSERT INTO " + rangePartitionTableName + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE rating > " + str(minRating) + " and rating <= " + str(maxRating) + ";"
+            cur.execute(insertQuery)
+    
+    cur.close()
+    openconnection.commit()
 
 
 def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
+
     pass # Remove this once you are done with implementation
 
 
