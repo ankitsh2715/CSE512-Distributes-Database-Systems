@@ -9,17 +9,16 @@ def getOpenConnection(user='postgres', password='1234', dbname='postgres'):
 
 def loadRatings(ratingstablename, ratingsfilepath, openconnection):
     cur = openconnection.cursor()
-    
+    #create ratings table
     createQuery = "CREATE TABLE "+ ratingstablename +"(UserID integer, Delimiter1 char, MovieID integer, Delimiter2 char, Rating float, Delimiter3 char, Timestamp bigint);"
     cur.execute(createQuery)
-    
+    #copy input file data to ratings table
     ratingsFile = open(ratingsfilepath,'r')
-    
     cur.copy_from(ratingsFile, ratingstablename, sep=':')
-
+    #delete extra columns due to separator not being single-byte and Timestamp column
     alterQuery = "ALTER TABLE " + ratingstablename + " DROP COLUMN Delimiter1, DROP COLUMN Delimiter2, DROP COLUMN Delimiter3, DROP COLUMN Timestamp;" 
     cur.execute(alterQuery)
-    
+    #release objects
     cur.close()
     openconnection.commit()
 
