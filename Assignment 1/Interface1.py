@@ -8,7 +8,20 @@ def getOpenConnection(user='postgres', password='1234', dbname='postgres'):
 
 
 def loadRatings(ratingstablename, ratingsfilepath, openconnection):
-    pass # Remove this once you are done with implementation
+    cur = openconnection.cursor()
+    
+    createQuery = "CREATE TABLE "+ ratingstablename +"(UserID integer, Delimiter1 char, MovieID integer, Delimiter2 char, Rating float, Delimiter3 char, Timestamp bigint);"
+    cur.execute(createQuery)
+    
+    ratingsFile = open(ratingsfilepath,'r')
+    
+    cur.copy_from(ratingsFile, ratingstablename, sep=':')
+
+    alterQuery = "ALTER TABLE " + ratingstablename + " DROP COLUMN Delimiter1, DROP COLUMN Delimiter2, DROP COLUMN Delimiter3, DROP COLUMN Timestamp;" 
+    cur.execute(alterQuery)
+    
+    cur.close()
+    openconnection.commit()
 
 
 def rangePartition(ratingstablename, numberofpartitions, openconnection):
