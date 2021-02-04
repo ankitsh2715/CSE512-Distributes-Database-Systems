@@ -62,28 +62,22 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
 
 def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
     cur = openconnection.cursor()
-    insertCur = openconnection.cursor()
 
     for i in range(numberofpartitions):
         rrPartitionTableName = RROBIN_TABLE_PREFIX + str(i)
         createQuery = "CREATE TABLE " + RROBIN_TABLE_PREFIX + str(i) + " (userid integer, movieid integer, rating float);"
         cur.execute(createQuery)
     
-    selectQuery = "SELECT * FROM " + ratingstablename +";"
-    cur.execute(selectQuery)
+    alterQuery = "ALTER TABLE " + ratingstablename + " ADD rownumber serial;"
+    cur.execute(alterQuery)
     
-    i = 0
-    row = cur.fetchone()
-    while row:
-        index = i % numberofpartitions
-        tableName = RROBIN_TABLE_PREFIX + str(index)
-        insertQuery = f"INSERT INTO {tableName} (userid, movieid, rating) VALUES ({str(row[0])}, {str(row[1])}, {str(row[2])});"
-        print(insertQuery)
-        i = i + 1
-        row = cur.fetchone()
-        insertCur.execute(insertQuery)
-
-    insertCur.close()
+    for i in range(numberofpartitions):
+        insertQuery = "INSERT INTO " + RROBIN_TABLE_PREFIX + str(i) + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE (rownumber-1)%" + str(numberofpartitions) + "=" + str(i) +";"
+        cur.execute(insertQuery)
+        
+    alterQuery = "ALTER TABLE " + ratingstablename + " DROP COLUMN rownumber;"
+    cur.execute(alterQuery)
+    
     cur.close()
     openconnection.commit()
     
