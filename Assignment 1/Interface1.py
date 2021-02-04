@@ -27,6 +27,7 @@ def loadRatings(ratingstablename, ratingsfilepath, openconnection):
 
 
 def mytesterfunc():
+    
     pass
 
 def rangePartition(ratingstablename, numberofpartitions, openconnection):
@@ -34,7 +35,7 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
     
     if(numberofpartitions > 0):
         #to calculate range for ratings
-        interval = round(5.0/numberofpartitions,2)
+        interval = 5.0/numberofpartitions
     
         for i in range(numberofpartitions):
             rangePartitionTableName = RANGE_TABLE_PREFIX + str(i)
@@ -60,10 +61,32 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
 
 
 def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
+    cur = openconnection.cursor()
+    insertCur = openconnection.cursor()
 
-    pass # Remove this once you are done with implementation
+    for i in range(numberofpartitions):
+        rrPartitionTableName = RROBIN_TABLE_PREFIX + str(i)
+        createQuery = "CREATE TABLE " + RROBIN_TABLE_PREFIX + str(i) + " (userid integer, movieid integer, rating float);"
+        cur.execute(createQuery)
+    
+    selectQuery = "SELECT * FROM " + ratingstablename +";"
+    cur.execute(selectQuery)
+    
+    i = 0
+    row = cur.fetchone()
+    while row:
+        index = i % numberofpartitions
+        tableName = RROBIN_TABLE_PREFIX + str(index)
+        insertQuery = f"INSERT INTO {tableName} (userid, movieid, rating) VALUES ({str(row[0])}, {str(row[1])}, {str(row[2])});"
+        print(insertQuery)
+        i = i + 1
+        row = cur.fetchone()
+        insertCur.execute(insertQuery)
 
-
+    insertCur.close()
+    cur.close()
+    openconnection.commit()
+    
 def roundRobinInsert(ratingstablename, userid, itemid, rating, openconnection):
     pass # Remove this once you are done with implementation
 
