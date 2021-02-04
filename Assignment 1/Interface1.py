@@ -51,9 +51,11 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
             #because for first partition range is [0, interval]
             if(i==0):
                 insertQuery = "INSERT INTO " + rangePartitionTableName + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE rating >= " + str(minRating) + " and rating <= " + str(maxRating) + ";"
+                ########print(insertQuery)
             #because second partition onwards range is (interval, interval*2]
             else:
                 insertQuery = "INSERT INTO " + rangePartitionTableName + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE rating > " + str(minRating) + " and rating <= " + str(maxRating) + ";"
+                ########print(insertQuery)
             cur.execute(insertQuery)
     
     cur.close()
@@ -62,19 +64,20 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
 
 def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
     cur = openconnection.cursor()
-
+    #create partitions
     for i in range(numberofpartitions):
         rrPartitionTableName = RROBIN_TABLE_PREFIX + str(i)
         createQuery = "CREATE TABLE " + RROBIN_TABLE_PREFIX + str(i) + " (userid integer, movieid integer, rating float);"
         cur.execute(createQuery)
-    
+    #add column which gives rownumber value for ratings table
     alterQuery = "ALTER TABLE " + ratingstablename + " ADD rownumber serial;"
     cur.execute(alterQuery)
-    
+    #select all rows that will inserted into the fragment when using rrobin technique
     for i in range(numberofpartitions):
         insertQuery = "INSERT INTO " + RROBIN_TABLE_PREFIX + str(i) + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE (rownumber-1)%" + str(numberofpartitions) + "=" + str(i) +";"
+        #########print(insertQuery)
         cur.execute(insertQuery)
-        
+    #drop extra column that we created
     alterQuery = "ALTER TABLE " + ratingstablename + " DROP COLUMN rownumber;"
     cur.execute(alterQuery)
     
@@ -82,7 +85,28 @@ def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
     openconnection.commit()
     
 def roundRobinInsert(ratingstablename, userid, itemid, rating, openconnection):
-    pass # Remove this once you are done with implementation
+    cur = openconnection.cursor()
+    #count number of rows in ratings table
+    countQuery = "SELECT COUNT(*) FROM " + ratingstablename +";"
+    cur.execute(countQuery)
+    count = cur.fetchone()
+    totalRows = count[0]
+    #count number of rrobin partitions we must have created
+    countPartitionsQuery = f"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' and table_name like '{RROBIN_TABLE_PREFIX}%'"
+    cur.execute(countPartitionsQuery)
+    count = cur.fetchone()
+    totalPartitions = count[0]
+    #calculate index of partition where we need to insert new tuple
+    lastInsertTableIndex = totalRows%totalPartitions
+    #insert tuple in ratings table
+    insertQueryRatings = "INSERT INTO " + ratingstablename + "(userid, movieid, rating) VALUES (" + str(userid) + "," + str(itemid) + "," + str(rating) + ");"
+    cur.execute(insertQueryRatings)
+    #insert tuple in rrobin partition table
+    insertQueryRRobinPartition = "INSERT INTO " + RROBIN_TABLE_PREFIX + str(lastInsertTableIndex) + "(userid, movieid, rating) VALUES (" + str(userid) + "," + str(itemid) + "," + str(rating) + ");"
+    cur.execute(insertQueryRRobinPartition)
+    
+    cur.close()
+    openconnection.commit()
 
 
 def rangeInsert(ratingstablename, userid, itemid, rating, openconnection):
