@@ -41,9 +41,6 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
             rangePartitionTableName = RANGE_TABLE_PREFIX + str(i)
             minRating = i * interval
             maxRating = minRating + interval
-            #this if condition is not necessary
-            if(maxRating > 5):
-                maxRating = 5
             
             createQuery = "CREATE TABLE " + rangePartitionTableName + " (userid integer, movieid integer, rating float);"
             cur.execute(createQuery)
@@ -64,19 +61,23 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
 
 def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
     cur = openconnection.cursor()
+    
     #create partitions
     for i in range(numberofpartitions):
         rrPartitionTableName = RROBIN_TABLE_PREFIX + str(i)
         createQuery = "CREATE TABLE " + RROBIN_TABLE_PREFIX + str(i) + " (userid integer, movieid integer, rating float);"
         cur.execute(createQuery)
+    
     #add column which gives rownumber value for ratings table
     alterQuery = "ALTER TABLE " + ratingstablename + " ADD rownumber serial;"
     cur.execute(alterQuery)
+    
     #select all rows that will inserted into the fragment when using rrobin technique
     for i in range(numberofpartitions):
         insertQuery = "INSERT INTO " + RROBIN_TABLE_PREFIX + str(i) + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE (rownumber-1)%" + str(numberofpartitions) + "=" + str(i) +";"
         #########print(insertQuery)
         cur.execute(insertQuery)
+    
     #drop extra column that we created
     alterQuery = "ALTER TABLE " + ratingstablename + " DROP COLUMN rownumber;"
     cur.execute(alterQuery)
@@ -110,7 +111,40 @@ def roundRobinInsert(ratingstablename, userid, itemid, rating, openconnection):
 
 
 def rangeInsert(ratingstablename, userid, itemid, rating, openconnection):
-    pass # Remove this once you are done with implementation
+    cur = openconnection.cursor()
+    
+    #count number of range partitions we must have created
+    countPartitionsQuery = f"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' and table_name like '{RANGE_TABLE_PREFIX}%'"
+    cur.execute(countPartitionsQuery)
+    count = cur.fetchone()
+    totalPartitions = count[0]
+    
+    #to calculate range for ratings
+    interval = 5.0/totalPartitions
+    
+    for i in range(totalPartitions):
+        inThisPartition = False
+        #getting range for partitions in similar way I calculated the range in rangePartition()
+        rangePartitionTableName = RANGE_TABLE_PREFIX + str(i)
+        minRating = i * interval
+        maxRating = minRating + interval
+        # for i=0 [minRating, maxRating]
+        if i==0:
+            if rating>=minRating and rating<=maxRating:
+                inThisPartition = True
+        else: #for i>0 (minRating, maxRating]
+            if rating>minRating and rating<=maxRating:
+                inThisPartition = True
+        
+        if inThisPartition: # if rating input falls in this partition then add it
+            insertQueryRRobinPartition = "INSERT INTO " + RANGE_TABLE_PREFIX + str(i) + "(userid, movieid, rating) VALUES (" + str(userid) + "," + str(itemid) + "," + str(rating) + ");"
+            cur.execute(insertQueryRRobinPartition)
+            insertQueryRatings = "INSERT INTO " + ratingstablename + "(userid, movieid, rating) VALUES (" + str(userid) + "," + str(itemid) + "," + str(rating) + ");"
+            cur.execute(insertQueryRatings)
+            break
+    
+    cur.close()
+    openconnection.commit()
 
 
 def rangeQuery(ratingMinValue, ratingMaxValue, openconnection, outputPath):
