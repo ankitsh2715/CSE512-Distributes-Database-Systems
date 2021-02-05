@@ -11,7 +11,8 @@ def getOpenConnection(user='postgres', password='1234', dbname='postgres'):
 
 
 def loadRatings(ratingstablename, ratingsfilepath, openconnection):
-    cur = openconnection.cursor()
+    conn = openconnection
+    cur = conn.cursor()
     
     #create ratings table #DelimiterX columns are for extra ':' in '::' as copy_from function only takes single-byte sep input
     createQuery = "CREATE TABLE " + ratingstablename+ "(userid integer, delimiter1 char, movieid integer, delimiter2 char, rating float, delimiter3 char, timestamp bigint);"
@@ -27,11 +28,12 @@ def loadRatings(ratingstablename, ratingsfilepath, openconnection):
     
     #release objects
     cur.close()
-    openconnection.commit()
+    conn.commit()
 
 
 def rangePartition(ratingstablename, numberofpartitions, openconnection):
-    cur = openconnection.cursor()
+    conn = openconnection
+    cur = conn.cursor()
     
     if(numberofpartitions > 0):
         #to calculate range for ratings
@@ -52,11 +54,12 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
             cur.execute(insertQuery)
     
     cur.close()
-    openconnection.commit()
+    conn.commit()
 
 
 def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
-    cur = openconnection.cursor()
+    conn = openconnection
+    cur = conn.cursor()
     
     #create partitions
     for i in range(numberofpartitions):
@@ -78,10 +81,11 @@ def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
     cur.execute(alterQuery)
     
     cur.close()
-    openconnection.commit()
+    conn.commit()
     
 def roundRobinInsert(ratingstablename, userid, itemid, rating, openconnection):
-    cur = openconnection.cursor()
+    conn = openconnection
+    cur = conn.cursor()
     
     #count number of rows in ratings table
     countQuery = "SELECT COUNT(*) FROM " + ratingstablename +";"
@@ -104,11 +108,12 @@ def roundRobinInsert(ratingstablename, userid, itemid, rating, openconnection):
     cur.execute(insertQueryRRobinPartition)
     
     cur.close()
-    openconnection.commit()
+    conn.commit()
 
 
 def rangeInsert(ratingstablename, userid, itemid, rating, openconnection):
-    cur = openconnection.cursor()
+    conn = openconnection
+    cur = conn.cursor()
     
     totalPartitions = countPartitions(RANGE_TABLE_PREFIX, cur)
     
@@ -137,7 +142,7 @@ def rangeInsert(ratingstablename, userid, itemid, rating, openconnection):
             break
     
     cur.close()
-    openconnection.commit()
+    conn.commit()
 
 
 def rangeQuery(ratingMinValue, ratingMaxValue, openconnection, outputPath):
@@ -145,32 +150,37 @@ def rangeQuery(ratingMinValue, ratingMaxValue, openconnection, outputPath):
     if os.path.exists(outputPath):
         os.remove(outputPath)
     
-    cur = openconnection.cursor()
+    conn = openconnection
+    cur = conn.cursor()
     
     #function call to get total range partitions created
     totalRangePartitions = countPartitions(RANGE_TABLE_PREFIX, cur)
     #write tuples to output file looping through all range partitions
     for i in range(totalRangePartitions):
+        
         selectQuery = "SELECT * FROM " + RANGE_TABLE_PREFIX + str(i) + " WHERE rating >= " + str(ratingMinValue) + " and rating <= " + str(ratingMaxValue) + ";"
         cur.execute(selectQuery)
-        rows = cur.fetchall()
-        for row in rows:
+        row = cur.fetchone()
+        while row:
             res = f"{RANGE_TABLE_PREFIX}{i},{row[0]},{row[1]},{row[2]}"
             saveToFile(res, outputPath)
+            row = cur.fetchone()
     
     #function call to get total rrobin partitions created
     totalRRobinPartitions = countPartitions(RROBIN_TABLE_PREFIX, cur)
     #write tuples to output file looping through all rrobin partitions
     for i in range(totalRRobinPartitions):
+        
         selectQuery = "SELECT * FROM " + RROBIN_TABLE_PREFIX + str(i) + " WHERE rating >= " + str(ratingMinValue) + " and rating <= " + str(ratingMaxValue) + ";"
         cur.execute(selectQuery)
-        rows = cur.fetchall()
-        for row in rows:
+        row = cur.fetchone()
+        while row:
             res = f"{RROBIN_TABLE_PREFIX}{i},{row[0]},{row[1]},{row[2]}"
             saveToFile(res, outputPath)
+            row = cur.fetchone()
     
     cur.close()
-    openconnection.commit()
+    conn.commit()
 
 
 def pointQuery(ratingValue, openconnection, outputPath):
@@ -178,7 +188,8 @@ def pointQuery(ratingValue, openconnection, outputPath):
     if os.path.exists(outputPath):
         os.remove(outputPath)
     
-    cur = openconnection.cursor()
+    conn = openconnection
+    cur = conn.cursor()
     
     #function call to get total range partitions created
     totalRangePartitions = countPartitions(RANGE_TABLE_PREFIX, cur)
@@ -186,10 +197,11 @@ def pointQuery(ratingValue, openconnection, outputPath):
     for i in range(totalRangePartitions):
         selectQuery = "SELECT * FROM " + RANGE_TABLE_PREFIX + str(i) + " WHERE rating = " + str(ratingValue) + ";"
         cur.execute(selectQuery)
-        rows = cur.fetchall()
-        for row in rows:
+        row = cur.fetchone()
+        while row:
             res = f"{RANGE_TABLE_PREFIX}{i},{row[0]},{row[1]},{row[2]}"
             saveToFile(res, outputPath)
+            row = cur.fetchone()
     
     #function call to get total rrobin partitions created
     totalRRobinPartitions = countPartitions(RROBIN_TABLE_PREFIX, cur)
@@ -197,13 +209,14 @@ def pointQuery(ratingValue, openconnection, outputPath):
     for i in range(totalRRobinPartitions):
         selectQuery = "SELECT * FROM " + RROBIN_TABLE_PREFIX + str(i) + " WHERE rating = " + str(ratingValue) + ";"
         cur.execute(selectQuery)
-        rows = cur.fetchall()
-        for row in rows:
+        row = cur.fetchone()
+        while row:
             res = f"{RROBIN_TABLE_PREFIX}{i},{row[0]},{row[1]},{row[2]}"
             saveToFile(res, outputPath)
+            row = cur.fetchone()
     
     cur.close()
-    openconnection.commit()
+    conn.commit()
 
 
 def countPartitions(tablePrefix, cur):
@@ -217,7 +230,6 @@ def saveToFile(resStr, filePath):
     file = open(filePath, 'a')
     file.write(resStr+"\n")
     file.close()
-
 
 def createDB(dbname='dds_assignment1'):
     """
