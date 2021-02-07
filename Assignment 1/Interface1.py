@@ -39,18 +39,19 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
         #to calculate range for ratings
         interval = 5.0 / numberofpartitions
     
+        
         for i in range(numberofpartitions):
-            rangePartitionTableName = RANGE_TABLE_PREFIX + str(i)
+            createQuery = "CREATE TABLE " + RANGE_TABLE_PREFIX + str(i) + " (userid integer, movieid integer, rating float);"
+            cur.execute(createQuery)
+        
+        for i in range(numberofpartitions):
             minRating = i * interval
             maxRating = minRating + interval
             
-            createQuery = "CREATE TABLE " + rangePartitionTableName + " (userid integer, movieid integer, rating float);"
-            cur.execute(createQuery)
-            
             if(i==0): #because for first partition range is [0, interval]
-                insertQuery = "INSERT INTO " + rangePartitionTableName + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE rating >= " + str(minRating) + " and rating <= " + str(maxRating) + ";"
-            else: #because second partition onwards range is (interval, interval*2]
-                insertQuery = "INSERT INTO " + rangePartitionTableName + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE rating > " + str(minRating) + " and rating <= " + str(maxRating) + ";"
+                insertQuery = "INSERT INTO " + RANGE_TABLE_PREFIX + str(i) + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE rating >= " + str(minRating) + " and rating <= " + str(maxRating) + ";"
+            else: #because second partition onwards range is (minRating, maxRating]
+                insertQuery = "INSERT INTO " + RANGE_TABLE_PREFIX + str(i) + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE rating > " + str(minRating) + " and rating <= " + str(maxRating) + ";"
             cur.execute(insertQuery)
     
     cur.close()
@@ -63,7 +64,6 @@ def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
     
     #create partitions
     for i in range(numberofpartitions):
-        rrPartitionTableName = RROBIN_TABLE_PREFIX + str(i)
         createQuery = "CREATE TABLE " + RROBIN_TABLE_PREFIX + str(i) + " (userid integer, movieid integer, rating float);"
         cur.execute(createQuery)
     
@@ -71,12 +71,12 @@ def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
     alterQuery = "ALTER TABLE " + ratingstablename + " ADD rownumber serial;"
     cur.execute(alterQuery)
     
-    #select all rows that should be inserted into the corresponding fragment when using rrobin technique
+    #select all rows that should be inserted into the corresponding fragment when using rrobin technique. (rownumber-1)%totalPartitions = partitionIndex
     for i in range(numberofpartitions):
         insertQuery = "INSERT INTO " + RROBIN_TABLE_PREFIX + str(i) + " (userid, movieid, rating) SELECT userid, movieid, rating FROM " + ratingstablename + " WHERE (rownumber-1)%" + str(numberofpartitions) + "=" + str(i) +";"
         cur.execute(insertQuery)
     
-    #drop extra column that we created
+    #drop extra column that I created
     alterQuery = "ALTER TABLE " + ratingstablename + " DROP COLUMN rownumber;"
     cur.execute(alterQuery)
     
@@ -99,11 +99,11 @@ def roundRobinInsert(ratingstablename, userid, itemid, rating, openconnection):
     #calculate index of partition where we need to insert new tuple
     lastInsertTableIndex = totalRows % totalPartitions
     
-    #insert tuple in ratings table
+    #insert tuple in ratings table to maintain consistency between main table and its fragments
     insertQueryRatings = "INSERT INTO " + ratingstablename + "(userid, movieid, rating) VALUES (" + str(userid) + "," + str(itemid) + "," + str(rating) + ");"
     cur.execute(insertQueryRatings)
     
-    #insert tuple in rrobin partition table
+    #insert same tuple in rrobin partition table
     insertQueryRRobinPartition = "INSERT INTO " + RROBIN_TABLE_PREFIX + str(lastInsertTableIndex) + "(userid, movieid, rating) VALUES (" + str(userid) + "," + str(itemid) + "," + str(rating) + ");"
     cur.execute(insertQueryRRobinPartition)
     
@@ -126,20 +126,20 @@ def rangeInsert(ratingstablename, userid, itemid, rating, openconnection):
         rangePartitionTableName = RANGE_TABLE_PREFIX + str(i)
         minRating = i * interval
         maxRating = minRating + interval
-        # for i=0 [minRating, maxRating]
-        if i==0:
+        
+        if i==0: #for i=0 [ minRating, maxRating ]
             if rating>=minRating and rating<=maxRating:
                 inThisPartition = True
-        else: #for i>0 (minRating, maxRating]
+        else: #for i>0 ( minRating, maxRating ]
             if rating>minRating and rating<=maxRating:
                 inThisPartition = True
         
-        if inThisPartition: # if rating input falls in this partition then add it
+        if inThisPartition: #if rating input falls in this partition then add it to main table and correct fragment
             insertQueryRRobinPartition = "INSERT INTO " + RANGE_TABLE_PREFIX + str(i) + "(userid, movieid, rating) VALUES (" + str(userid) + "," + str(itemid) + "," + str(rating) + ");"
             cur.execute(insertQueryRRobinPartition)
             insertQueryRatings = "INSERT INTO " + ratingstablename + "(userid, movieid, rating) VALUES (" + str(userid) + "," + str(itemid) + "," + str(rating) + ");"
             cur.execute(insertQueryRatings)
-            break
+            break #no need to loop thru other partitions
     
     cur.close()
     conn.commit()
@@ -153,32 +153,33 @@ def rangeQuery(ratingMinValue, ratingMaxValue, openconnection, outputPath):
     conn = openconnection
     cur = conn.cursor()
     
-    #function call to get total range partitions created
+    #function call to get total partitions created
     totalRangePartitions = countPartitions(RANGE_TABLE_PREFIX, cur)
+    totalRRobinPartitions = countPartitions(RROBIN_TABLE_PREFIX, cur)
+    
     #write tuples to output file looping through all range partitions
-    for i in range(totalRangePartitions):
-        
+    file = open(outputPath, 'a')
+    
+    for i in range(totalRangePartitions):  
         selectQuery = "SELECT * FROM " + RANGE_TABLE_PREFIX + str(i) + " WHERE rating >= " + str(ratingMinValue) + " and rating <= " + str(ratingMaxValue) + ";"
         cur.execute(selectQuery)
         row = cur.fetchone()
         while row:
             res = f"{RANGE_TABLE_PREFIX}{i},{row[0]},{row[1]},{row[2]}"
-            saveToFile(res, outputPath)
+            file.write(res+"\n")
             row = cur.fetchone()
     
-    #function call to get total rrobin partitions created
-    totalRRobinPartitions = countPartitions(RROBIN_TABLE_PREFIX, cur)
     #write tuples to output file looping through all rrobin partitions
-    for i in range(totalRRobinPartitions):
-        
+    for i in range(totalRRobinPartitions):   
         selectQuery = "SELECT * FROM " + RROBIN_TABLE_PREFIX + str(i) + " WHERE rating >= " + str(ratingMinValue) + " and rating <= " + str(ratingMaxValue) + ";"
         cur.execute(selectQuery)
         row = cur.fetchone()
         while row:
             res = f"{RROBIN_TABLE_PREFIX}{i},{row[0]},{row[1]},{row[2]}"
-            saveToFile(res, outputPath)
+            file.write(res+"\n")
             row = cur.fetchone()
     
+    file.close()
     cur.close()
     conn.commit()
 
@@ -191,30 +192,32 @@ def pointQuery(ratingValue, openconnection, outputPath):
     conn = openconnection
     cur = conn.cursor()
     
-    #function call to get total range partitions created
+    #function call to get total partitions created
     totalRangePartitions = countPartitions(RANGE_TABLE_PREFIX, cur)
-    #write tuples to output file looping through all range partitions
+    totalRRobinPartitions = countPartitions(RROBIN_TABLE_PREFIX, cur)
+
+    #write tuples to output file looping through all partitions
+    file = open(outputPath,'a')
+    
     for i in range(totalRangePartitions):
         selectQuery = "SELECT * FROM " + RANGE_TABLE_PREFIX + str(i) + " WHERE rating = " + str(ratingValue) + ";"
         cur.execute(selectQuery)
         row = cur.fetchone()
         while row:
             res = f"{RANGE_TABLE_PREFIX}{i},{row[0]},{row[1]},{row[2]}"
-            saveToFile(res, outputPath)
+            file.write(res+"\n")
             row = cur.fetchone()
     
-    #function call to get total rrobin partitions created
-    totalRRobinPartitions = countPartitions(RROBIN_TABLE_PREFIX, cur)
-    #write tuples to output file looping through all rrobin partitions
     for i in range(totalRRobinPartitions):
         selectQuery = "SELECT * FROM " + RROBIN_TABLE_PREFIX + str(i) + " WHERE rating = " + str(ratingValue) + ";"
         cur.execute(selectQuery)
         row = cur.fetchone()
         while row:
             res = f"{RROBIN_TABLE_PREFIX}{i},{row[0]},{row[1]},{row[2]}"
-            saveToFile(res, outputPath)
+            file.write(res+"\n")
             row = cur.fetchone()
     
+    file.close()
     cur.close()
     conn.commit()
 
@@ -226,10 +229,6 @@ def countPartitions(tablePrefix, cur):
     totalPartitions = count[0]
     return totalPartitions
 
-def saveToFile(resStr, filePath):
-    file = open(filePath, 'a')
-    file.write(resStr+"\n")
-    file.close()
 
 def createDB(dbname='dds_assignment1'):
     """
