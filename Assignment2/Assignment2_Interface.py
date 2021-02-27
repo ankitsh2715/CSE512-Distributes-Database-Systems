@@ -12,17 +12,11 @@ def ParallelSort (InputTable, SortingColumnName, OutputTable, openconnection):
     conn = openconnection
     cur = conn.cursor()
 
-    #get min value for SortingColumnName
-    minQuery = "SELECT MIN({0}) FROM {1};".format(SortingColumnName, InputTable)
-    cur.execute(minQuery)
-    minVal = cur.fetchone()[0]
+    #get min and max values in SortingColumnName
+    minVal = getMin(openconnection, SortingColumnName, InputTable)
+    maxVal = getMax(openconnection, SortingColumnName, InputTable)
 
-    #get max value for SortingColumnName
-    maxQuery = "SELECT MAX({0}) FROM {1};".format(SortingColumnName, InputTable)
-    cur.execute(maxQuery)
-    maxVal = cur.fetchone()[0]
-
-    numThreads = 5          # 5 threads to be used
+    numThreads = 5          # 5 threads to be used as specified in assignment
     threadList = []         # list to store thread objects
     tableNamePrefix = "parallelSort_part_" # prefix for partition table that needs to be created 
     rangeVal = float((maxVal-minVal)/numThreads) # range of ratings each partition will store and sort
@@ -41,13 +35,8 @@ def ParallelSort (InputTable, SortingColumnName, OutputTable, openconnection):
         #wait for all threads to complete
         threadList[i].join()
     
-    #drop any previous output table that may exist from other test cases
-    dropOutputTableQuery = "DROP TABLE IF EXISTS {0};".format(OutputTable)
-    cur.execute(dropOutputTableQuery)
-
-    #create output table with same schema as input table
-    createOutputTableQuery = "CREATE TABLE {0} (LIKE {1} INCLUDING ALL);".format(OutputTable, InputTable)
-    cur.execute(createOutputTableQuery)
+    #create OutputTable LIKE InputTable
+    createNewTable(openconnection, OutputTable, InputTable)
 
     for i in range(numThreads):
         #insert rows in output table in order partTable0, partTable1, partTable2....
@@ -55,18 +44,11 @@ def ParallelSort (InputTable, SortingColumnName, OutputTable, openconnection):
         cur.execute(insertSortPartitionQuery)
     
     for i in range(numThreads):
-        #delete temporary part tables that we created
+        #delete temporary part tables that we created for parallel sorting
         dropSortPartTableQuery = "DROP TABLE IF EXISTS {0}{1};".format(tableNamePrefix,i)
         cur.execute(dropSortPartTableQuery)
 
-    #cur.execute("SELECT * from " + "(SELECT * FROM " + InputTable + ") as st where st.movieid not in (select movieid from "+ OutputTable +");")
-    #print(cur.fetchall())
-    
     conn.commit()
-
-
-
-
 
 
 def createSortTablePartition(openconnection, inputTable, sortingColumnName, i, minVal, maxVal, prefix):
@@ -91,47 +73,25 @@ def createSortTablePartition(openconnection, inputTable, sortingColumnName, i, m
 
 
 
-
-
-
-
 def ParallelJoin (InputTable1, InputTable2, Table1JoinColumn, Table2JoinColumn, OutputTable, openconnection):
     conn = openconnection
     cur = conn.cursor()
 
-    #get min value for Table1JoinColumn
-    minQuery = "SELECT MIN({0}) FROM {1};".format(Table1JoinColumn, InputTable1)
-    cur.execute(minQuery)
-    minValTable1 = cur.fetchone()[0]
+    minValTable1 = getMin(openconnection, Table1JoinColumn, InputTable1)
+    maxValTable1 = getMax(openconnection, Table1JoinColumn, InputTable1)
 
-    #get max value for Table1JoinColumn
-    maxQuery = "SELECT MAX({0}) FROM {1};".format(Table1JoinColumn, InputTable1)
-    cur.execute(maxQuery)
-    maxValTable1 = cur.fetchone()[0]
-
-    #get min value for Table2JoinColumn
-    minQuery = "SELECT MIN({0}) FROM {1};".format(Table2JoinColumn, InputTable2)
-    cur.execute(minQuery)
-    minValTable2 = cur.fetchone()[0]
-
-    #get max value for Table2JoinColumn
-    maxQuery = "SELECT MAX({0}) FROM {1};".format(Table2JoinColumn, InputTable2)
-    cur.execute(maxQuery)
-    maxValTable2 = cur.fetchone()[0]
+    minValTable2 = getMin(openconnection, Table2JoinColumn, InputTable2)
+    maxValTable2 = getMax(openconnection, Table2JoinColumn, InputTable2)
 
     #get min and max values across Table1 and Table2
     minVal = min(minValTable1, minValTable2)
     maxVal = max(maxValTable1, maxValTable2)
     
-    schema_InputTable1 = getSchema(openconnection, InputTable1)
-    
-    schema_InputTable2 = getSchema(openconnection, InputTable2)
+    # OutputTable schema = InputTable1 schema
+    createNewTable(openconnection, OutputTable, InputTable1)
 
-    dropOutputTableQuery = "DROP TABLE IF EXISTS {0};".format(OutputTable)
-    cur.execute(dropOutputTableQuery)
-    
-    createOutputTable = "CREATE TABLE {0} (LIKE {1} INCLUDING ALL);".format(OutputTable, InputTable1)
-    cur.execute(createOutputTable)
+    # OutputTable schema = InputTable1 schema + InputTable2 schema
+    schema_InputTable2 = getSchema(openconnection, InputTable2)
 
     for i in range(len(schema_InputTable2)):
         alterTableQuery = "ALTER TABLE {0} ADD COLUMN {1} {2};".format(OutputTable, schema_InputTable2[i][0], schema_InputTable2[i][1])
@@ -140,29 +100,29 @@ def ParallelJoin (InputTable1, InputTable2, Table1JoinColumn, Table2JoinColumn, 
     numThreads = 5          # 5 threads to be used
     threadList = []         # list to store thread objects
     tableNamePrefix = "_join_part_" # prefix for partition table that needs to be created 
-    rangeVal = float((maxVal-minVal)/numThreads) # range of ratings each partition will store and sort
+    rangeVal = float((maxVal-minVal)/numThreads) # range of joinColumn values each partition will store
 
     for i in range(numThreads):
         #min and max value of creating partition for thread[i]
         minValPart = minVal + (i*rangeVal)
         maxValPart = minValPart + rangeVal
 
-        #print("min="+str(minValPart)+"   max="+str(maxValPart))
-        
         #thread constructor
         t = threading.Thread(target=createJoinTablePartition, args=(openconnection, InputTable1, InputTable2, Table1JoinColumn, Table2JoinColumn, OutputTable, i, minValPart, maxValPart, tableNamePrefix))
         threadList.append(t)
-        t.start() #thread calls createSortTablePartition()
+        t.start() #thread calls createJoinTablePartition()
 
     for i in range(numThreads):
+        #main thread waits for all thread to complete task
         threadList[i].join()
     
     for i in range(numThreads):
-        #insert rows in output table in order partTable0, partTable1, partTable2....
+        #insert rows in output table in order join_part_0, join_part_1, join_part_2....
         insertJoinPartitionQuery = "INSERT INTO {0} SELECT * FROM {0}{1}{2};".format(OutputTable, tableNamePrefix, i)
         cur.execute(insertJoinPartitionQuery)
     
     for i in range(numThreads):
+        #delete all partitions we created for parallel join operation
         dropPartTable1Query = "DROP TABLE IF EXISTS {0}{1}{2};".format(InputTable1,tableNamePrefix,i)
         cur.execute(dropPartTable1Query)
 
@@ -171,8 +131,6 @@ def ParallelJoin (InputTable1, InputTable2, Table1JoinColumn, Table2JoinColumn, 
 
         dropPartOutputQuery = "DROP TABLE IF EXISTS {0}{1}{2};".format(OutputTable,tableNamePrefix,i)
         cur.execute(dropPartOutputQuery)
-    # cur.execute("SELECT * from " + "(SELECT * FROM " + InputTable1 + " INNER JOIN " + InputTable2 + " ON " + InputTable1 + "." + Table1JoinColumn + " = " + InputTable2 + "." + Table2JoinColumn + ") as jt where jt.movieid not in (select movieid from "+ OutputTable +");")
-    # print(cur.fetchall())
 
     conn.commit()
 
@@ -185,29 +143,34 @@ def createJoinTablePartition(openconnection, InputTable1, InputTable2, Table1Joi
     table2_part = str(InputTable2)+str(tableNamePrefix)+str(i)
     outputTable_part = str(OutputTable)+str(tableNamePrefix)+str(i)
 
+    #create tables table1_join_part_i , table2_join_part_i , outputtable1_join_part_i
     createNewTable(openconnection, table1_part, InputTable1)
     createNewTable(openconnection, table2_part, InputTable2)
     createNewTable(openconnection, outputTable_part, OutputTable)
 
     if i==0:
+        #insert rows in table1_part where [min <= Table1JoinColumn <= max]
         insertQuery_table1_part = "INSERT INTO {0} SELECT * FROM {1} WHERE {2} >= {3} AND {2} <= {4};".format(table1_part, InputTable1, Table1JoinColumn, minValPart, maxValPart)
         cur.execute(insertQuery_table1_part)
-
+        #insert rows in table2_part where [min <= Table2JoinColumn <= max]
         insertQuery_table2_part = "INSERT INTO {0} SELECT * FROM {1} WHERE {2} >= {3} AND {2} <= {4};".format(table2_part, InputTable2, Table2JoinColumn, minValPart, maxValPart)
         cur.execute(insertQuery_table2_part)
     
     else:
+        #insert rows in table1_part where [min < Table1JoinColumn <=max]
         insertQuery_table1_part = "INSERT INTO {0} SELECT * FROM {1} WHERE {2} > {3} AND {2} <= {4};".format(table1_part, InputTable1, Table1JoinColumn, minValPart, maxValPart)
         cur.execute(insertQuery_table1_part)
-
+        #insert rows in table2_part where [min < Table1JoinColumn <=max]
         insertQuery_table2_part = "INSERT INTO {0} SELECT * FROM {1} WHERE {2} > {3} AND {2} <= {4};".format(table2_part, InputTable2, Table2JoinColumn, minValPart, maxValPart)
         cur.execute(insertQuery_table2_part)
     
+    #perform inner join on table1_part.Table1JoinColumn and table2_part.Table2JoinColumn
     joinQuery = "INSERT INTO {0} SELECT * FROM {1} INNER JOIN {2} ON {1}.{3} = {2}.{4};".format(outputTable_part, table1_part, table2_part, Table1JoinColumn, Table2JoinColumn)
     cur.execute(joinQuery)
 
     return
 
+#function to get MIN value in colName in tableName
 def getMin(openconnection, colName, tablename):
     conn = openconnection
     cur = conn.cursor()
@@ -216,6 +179,7 @@ def getMin(openconnection, colName, tablename):
     cur.execute(minQuery)
     return cur.fetchone()[0]
 
+#function to get MAX value in colName in tableName
 def getMax(openconnection, colName, tablename):
     conn = openconnection
     cur = conn.cursor()
@@ -224,7 +188,17 @@ def getMax(openconnection, colName, tablename):
     cur.execute(maxQuery)
     return cur.fetchone()[0]
 
+#function returns schema of tableName
+def getSchema(openconnection, tableName):
+    conn = openconnection
+    cur = conn.cursor()
 
+    query = "SELECT column_name, data_type FROM information_schema.columns WHERE table_name='{0}'".format(tableName)
+    cur.execute(query)
+
+    return cur.fetchall()
+
+#drop table if tableName exists. Create tableName LIKE likeTable
 def createNewTable(openconnection, tableName, likeTable):
     con = openconnection	
     cur = con.cursor()
@@ -236,17 +210,6 @@ def createNewTable(openconnection, tableName, likeTable):
     cur.execute(createQuery)
 
     return
-
-def getSchema (openconnection, tableName):
-    conn = openconnection
-    cur = conn.cursor()
-
-    query = "SELECT column_name, data_type FROM information_schema.columns WHERE table_name='{0}'".format(tableName)
-    cur.execute(query)
-
-    return cur.fetchall()
-
-    
 
 
 
