@@ -71,6 +71,8 @@ def createSortTablePartition(openconnection, inputTable, sortingColumnName, i, m
         sortInsertQuery = "INSERT INTO {0}{1} SELECT * FROM {2} WHERE {3} > {4} AND {3} <= {5} ORDER BY {3} ASC;".format(prefix, i, inputTable, sortingColumnName, minVal, maxVal)
     cur.execute(sortInsertQuery)
 
+    conn.commit()
+
 
 
 def ParallelJoin (InputTable1, InputTable2, Table1JoinColumn, Table2JoinColumn, OutputTable, openconnection):
@@ -136,8 +138,8 @@ def ParallelJoin (InputTable1, InputTable2, Table1JoinColumn, Table2JoinColumn, 
 
 
 def createJoinTablePartition(openconnection, InputTable1, InputTable2, Table1JoinColumn, Table2JoinColumn, OutputTable, i, minValPart, maxValPart, tableNamePrefix):
-    con = openconnection	
-    cur = con.cursor()
+    conn = openconnection	
+    cur = conn.cursor()
 
     table1_part = str(InputTable1)+str(tableNamePrefix)+str(i)
     table2_part = str(InputTable2)+str(tableNamePrefix)+str(i)
@@ -168,7 +170,7 @@ def createJoinTablePartition(openconnection, InputTable1, InputTable2, Table1Joi
     joinQuery = "INSERT INTO {0} SELECT * FROM {1} INNER JOIN {2} ON {1}.{3} = {2}.{4};".format(outputTable_part, table1_part, table2_part, Table1JoinColumn, Table2JoinColumn)
     cur.execute(joinQuery)
 
-    return
+    conn.commit()
 
 #function to get MIN value in colName in tableName
 def getMin(openconnection, colName, tablename):
@@ -200,8 +202,8 @@ def getSchema(openconnection, tableName):
 
 #drop table if tableName exists. Create tableName LIKE likeTable
 def createNewTable(openconnection, tableName, likeTable):
-    con = openconnection	
-    cur = con.cursor()
+    conn = openconnection	
+    cur = conn.cursor()
     
     dropQuery = "DROP TABLE IF EXISTS {0};".format(tableName)
     cur.execute(dropQuery)
@@ -209,7 +211,7 @@ def createNewTable(openconnection, tableName, likeTable):
     createQuery = "CREATE TABLE {0} (LIKE {1} INCLUDING ALL);".format(tableName, likeTable)
     cur.execute(createQuery)
 
-    return
+    conn.commit()
 
 
 
