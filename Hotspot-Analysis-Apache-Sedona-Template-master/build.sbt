@@ -42,4 +42,4 @@ resolvers +=
   "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots"
 
 resolvers +=
-  "Open Source Geospatial Foundation Repository" at "http://download.osgeo.org/webdav/geotools"
+  "Open Source Geospatial Foundation Repository" at "https://download.osgeo.org/webdav/geotools"
