@@ -37,9 +37,3 @@ assemblyMergeStrategy in assembly := {
   case path if path.endsWith(".RSA") => MergeStrategy.discard
   case _ => MergeStrategy.first
 }
-
-resolvers +=
-  "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots"
-
-resolvers +=
-  "Open Source Geospatial Foundation Repository" at "https://download.osgeo.org/webdav/geotools"
